@@ -30,12 +30,18 @@ namespace NugetForUnity
         private const int TimeOut = 60000;
 
         /// <summary>
+        /// The relative path of nuget stuff. Look, I know static readonly / const paths are cool but I don't need all third party shit at my fucking root.
+        /// Also changing the path by forking the repo and modifying a helper script instead of having the path settings at the preferences page is not cool either
+        /// </summary>
+        private static readonly string NugetProjectRelativePath = "Plugins/NuGet";
+
+        /// <summary>
         ///     The path to the nuget.config file.
         /// </summary>
         /// <remarks>
         ///     <see cref="NugetConfigFile" />
         /// </remarks>
-        public static readonly string NugetConfigFilePath = Path.GetFullPath(Path.Combine(Application.dataPath, NugetConfigFile.FileName));
+        public static readonly string NugetConfigFilePath = Path.GetFullPath(Path.Combine(Application.dataPath, NugetProjectRelativePath, NugetConfigFile.FileName));
 
         /// <summary>
         ///     The path to the packages.config file.
@@ -43,7 +49,7 @@ namespace NugetForUnity
         /// <remarks>
         ///     <see cref="PackagesConfigFile" />
         /// </remarks>
-        private static readonly string PackagesConfigFilePath = Path.GetFullPath(Path.Combine(Application.dataPath, PackagesConfigFile.FileName));
+        private static readonly string PackagesConfigFilePath = Path.GetFullPath(Path.Combine(Application.dataPath, NugetProjectRelativePath, PackagesConfigFile.FileName));
 
         /// <summary>
         ///     Gets the absolute path to the Unity-Project root directory.

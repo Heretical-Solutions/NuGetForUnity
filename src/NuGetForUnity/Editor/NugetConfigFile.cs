@@ -328,14 +328,32 @@ namespace NugetForUnity
     <add key=""All"" value=""(Aggregate source)"" />
   </activePackageSource>
   <config>
-    <add key=""repositoryPath"" value=""./Packages"" />
+    <add key=""repositoryPath"" value=""./Plugins/NuGet/Packages"" />
     <add key=""DefaultPushSource"" value=""http://www.nuget.org/api/v2/"" />
   </config>
 </configuration>";
 
+            EnsureDirectoryExists(filePath);
+
             File.WriteAllText(filePath, contents, new UTF8Encoding());
 
             return Load(filePath);
+        }
+
+        private static void EnsureDirectoryExists(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new Exception("[NugetConfigFile] INVALID PATH");
+			
+            string directoryPath = Path.GetDirectoryName(path);
+
+            if (string.IsNullOrEmpty(directoryPath))
+                throw new Exception("[NugetConfigFile] INVALID DIRECTORY PATH");
+			
+            if (!Directory.Exists(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
         }
     }
 }
