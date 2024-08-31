@@ -1,11 +1,28 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Text.RegularExpressions;
-using UnityEditor;
-using UnityEngine;
+﻿#pragma warning disable SA1512,SA1124 // Single-line comments should not be followed by blank line
 
+#if UNITY_2021_2_OR_NEWER
+using UnityEditor.Build;
+#endif
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using NugetForUnity.Configuration;
+using NugetForUnity.Models;
+using UnityEditor;
+
+#region No ReShaper
+
+// ReSharper disable All
+// needed because 'JetBrains.Annotations.NotNull' and 'System.Diagnostics.CodeAnalysis.NotNull' collide if this file is compiled with a never version of Unity / C#
+using SuppressMessageAttribute = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;
+
+// ReSharper restore All
+
+#endregion
+
+#pragma warning restore SA1512,SA1124 // Single-line comments should not be followed by blank line
 namespace NugetForUnity
 {
     /// <summary>
@@ -14,7 +31,8 @@ namespace NugetForUnity
     internal static class TargetFrameworkResolver
     {
         // highest priority first. We use values without '.' for easier comparison.
-        private static readonly TargetFrameworkSupport[] priorizedTargetFrameworks =
+        [NotNull]
+        private static readonly TargetFrameworkSupport[] PrioritizedTargetFrameworks =
         {
             new TargetFrameworkSupport("unity"),
 
@@ -89,11 +107,50 @@ namespace NugetForUnity
             new TargetFrameworkSupport(string.Empty),
         };
 
+        // Almost same as PrioritizedTargetFrameworks, but it prefers .NET Standard 2.x over .NET Framework.
+        [NotNull]
+        private static readonly TargetFrameworkSupport[] PrioritizedTargetFrameworksPreferNetStandard20Or21;
+
+        static TargetFrameworkResolver()
+        {
+            PrioritizedTargetFrameworksPreferNetStandard20Or21 = PrioritizedTargetFrameworks.OrderBy(
+                    framework =>
+                    {
+                        switch (framework.Name)
+                        {
+                            case "unity":
+                                return 1; // keep it first
+                            case "netstandard21":
+                                return 2; // Prefer .NET Standard 2.x over .NET Framework
+                            case "netstandard20":
+                                return 3; // Prefer .NET Standard 2.x over .NET Framework
+                            default:
+                                return 4; // keep the rest in the same order as before
+                        }
+                    })
+                .ToArray();
+        }
+
+        /// <summary>
+        ///     Gets the <see cref="ApiCompatibilityLevel" /> of the current selected build target.
+        /// </summary>
+        [SuppressMessage("ReSharper", "AutoPropertyCanBeMadeGetOnly.Local", Justification = "Property setter needed for unit test")]
+        internal static Lazy<ApiCompatibilityLevel> CurrentBuildTargetApiCompatibilityLevel { get; private set; } = new Lazy<ApiCompatibilityLevel>(
+            () =>
+            {
+#if UNITY_2021_2_OR_NEWER
+                return PlayerSettings.GetApiCompatibilityLevel(
+                    NamedBuildTarget.FromBuildTargetGroup(EditorUserBuildSettings.selectedBuildTargetGroup));
+#else
+                return PlayerSettings.GetApiCompatibilityLevel(EditorUserBuildSettings.selectedBuildTargetGroup);
+#endif
+            });
+
         private static DotnetVersionCompatibilityLevel CurrentBuildTargetDotnetVersionCompatibilityLevel
         {
             get
             {
-                switch (PlayerSettings.GetApiCompatibilityLevel(EditorUserBuildSettings.selectedBuildTargetGroup))
+                switch (CurrentBuildTargetApiCompatibilityLevel.Value)
                 {
                     case ApiCompatibilityLevel.NET_4_6:
                         return DotnetVersionCompatibilityLevel.NetFramework46Or48;
@@ -106,21 +163,63 @@ namespace NugetForUnity
         }
 
         /// <summary>
-        ///     Select the highest .NET library available that is supported
-        ///     See here: https://docs.nuget.org/ndocs/schema/target-frameworks
+        ///     Select the highest .NET library available that is supported by Unity.
+        ///     See here: https://docs.nuget.org/ndocs/schema/target-frameworks.
         /// </summary>
-        /// <param name="availableTargetFrameworks"></param>
-        /// <returns></returns>
-        public static string TryGetBestTargetFramework(IReadOnlyCollection<string> availableTargetFrameworks)
+        /// <param name="availableTargetFrameworks">The list of available target-frameworks.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <returns>The best matching target-framework.</returns>
+        [CanBeNull]
+        public static string TryGetBestTargetFramework(
+            [NotNull] [ItemNotNull] IReadOnlyCollection<string> availableTargetFrameworks,
+            [CanBeNull] string preferredTargetFramework)
         {
-            return TryGetBestTargetFramework(availableTargetFrameworks, targetFramework => targetFramework);
+            return TryGetBestTargetFramework(availableTargetFrameworks, preferredTargetFramework, targetFramework => targetFramework);
         }
 
-        public static T TryGetBestTargetFramework<T>(IReadOnlyCollection<T> availableTargetFrameworks, Func<T, string> getTrgetFreameworkString)
+        /// <summary>
+        ///     Select the highest .NET library available that is supported by Unity.
+        ///     See here: https://docs.nuget.org/ndocs/schema/target-frameworks.
+        /// </summary>
+        /// <typeparam name="T">The type of the target-framework.</typeparam>
+        /// <param name="availableTargetFrameworks">The list of available target-frameworks.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <param name="getTargetFrameworkString">A function to get the target-framework string.</param>
+        /// <returns>The best matching target-framework.</returns>
+        [CanBeNull]
+        public static T TryGetBestTargetFramework<T>(
+            [NotNull] [ItemNotNull] IReadOnlyCollection<T> availableTargetFrameworks,
+            [CanBeNull] string preferredTargetFramework,
+            [NotNull] Func<T, string> getTargetFrameworkString)
         {
+            if (!string.IsNullOrEmpty(preferredTargetFramework))
+            {
+                preferredTargetFramework = preferredTargetFramework.Replace(".", string.Empty);
+                var bestMatch = availableTargetFrameworks.FirstOrDefault(
+                    availableTargetFramework =>
+                    {
+                        var availableString = getTargetFrameworkString(availableTargetFramework).Replace(".", string.Empty);
+                        return availableString.Equals(preferredTargetFramework, StringComparison.OrdinalIgnoreCase);
+                    });
+
+                if (!Equals(bestMatch, default(T)))
+                {
+                    return bestMatch;
+                }
+            }
+
             var currentDotnetVersion = CurrentBuildTargetDotnetVersionCompatibilityLevel;
             var currentUnityVersion = UnityVersion.Current;
-            foreach (var targetFrameworkSupport in priorizedTargetFrameworks)
+            var prioritizedTargetFrameworks = ConfigurationManager.PreferNetStandardOverNetFramework ?
+                PrioritizedTargetFrameworksPreferNetStandard20Or21 :
+                PrioritizedTargetFrameworks;
+            foreach (var targetFrameworkSupport in prioritizedTargetFrameworks)
             {
                 if (targetFrameworkSupport.SupportedDotnetVersions.Length != 0 &&
                     !targetFrameworkSupport.SupportedDotnetVersions.Contains(currentDotnetVersion))
@@ -136,10 +235,11 @@ namespace NugetForUnity
                 var bestMatch = availableTargetFrameworks.FirstOrDefault(
                     availableTargetFramework =>
                     {
-                        var availableString = getTrgetFreameworkString(availableTargetFramework).Replace(".", "");
+                        var availableString = getTargetFrameworkString(availableTargetFramework).Replace(".", string.Empty);
                         return availableString.Equals(targetFrameworkSupport.Name, StringComparison.OrdinalIgnoreCase);
                     });
-                if (bestMatch != null)
+
+                if (!Equals(bestMatch, default(T)))
                 {
                     return bestMatch;
                 }
@@ -148,6 +248,88 @@ namespace NugetForUnity
             return default;
         }
 
+        /// <summary>
+        ///     Select the best target-framework group of a NuGet package.
+        /// </summary>
+        /// <param name="packageDependencies">The available frameworks.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <returns>The selected target framework group or null if non is matching.</returns>
+        [CanBeNull]
+        internal static NugetFrameworkGroup GetNullableBestDependencyFrameworkGroupForCurrentSettings(
+            [NotNull] [ItemNotNull] List<NugetFrameworkGroup> packageDependencies,
+            [CanBeNull] string preferredTargetFramework)
+        {
+            var bestTargetFramework = TryGetBestTargetFramework(
+                packageDependencies,
+                preferredTargetFramework,
+                frameworkGroup => frameworkGroup.TargetFramework);
+            NugetLogger.LogVerbose(
+                "Selecting {0} as the best target framework for current settings",
+                bestTargetFramework?.TargetFramework ?? "(null)");
+            return bestTargetFramework;
+        }
+
+        /// <summary>
+        ///     Select the best target-framework group of a NuGet package.
+        /// </summary>
+        /// <param name="packageDependencies">The available frameworks.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <returns>The selected target framework group or a empty group if non is matching.</returns>
+        [NotNull]
+        internal static NugetFrameworkGroup GetBestDependencyFrameworkGroupForCurrentSettings(
+            [NotNull] [ItemNotNull] List<NugetFrameworkGroup> packageDependencies,
+            [CanBeNull] string preferredTargetFramework)
+        {
+            return GetNullableBestDependencyFrameworkGroupForCurrentSettings(packageDependencies, preferredTargetFramework) ??
+                   new NugetFrameworkGroup();
+        }
+
+        /// <summary>
+        ///     Select the best target-framework group of a NuGet package.
+        /// </summary>
+        /// <param name="nuspec">The package of witch the dependencies are selected.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <returns>The selected target framework group or a empty group if non is matching.</returns>
+        [NotNull]
+        internal static NugetFrameworkGroup GetBestDependencyFrameworkGroupForCurrentSettings(
+            [NotNull] NuspecFile nuspec,
+            [CanBeNull] string preferredTargetFramework)
+        {
+            return GetBestDependencyFrameworkGroupForCurrentSettings(nuspec.Dependencies, preferredTargetFramework);
+        }
+
+        /// <summary>
+        ///     Select the best target-framework name.
+        /// </summary>
+        /// <param name="targetFrameworks">The available frameworks.</param>
+        /// <param name="preferredTargetFramework">
+        ///     The overwritten / preferred target-framework to use instead of determining the best matching target framework
+        ///     from the Unity settings ('Api Compatibility Level').
+        /// </param>
+        /// <returns>The selected target framework or null if non is matching.</returns>
+        [CanBeNull]
+        internal static string TryGetBestTargetFrameworkForCurrentSettings(
+            [NotNull] [ItemNotNull] IReadOnlyCollection<string> targetFrameworks,
+            [CanBeNull] string preferredTargetFramework)
+        {
+            var result = TryGetBestTargetFramework(targetFrameworks, preferredTargetFramework);
+            NugetLogger.LogVerbose("Selecting {0} as the best target framework for current settings", result ?? "(null)");
+            return result;
+        }
+
+        [SuppressMessage(
+            "StyleCop.CSharp.OrderingRules",
+            "SA1201:Elements should appear in the correct order",
+            Justification = "We like private enums at the botom of the file.")]
         private enum DotnetVersionCompatibilityLevel
         {
             None = 0,
@@ -166,15 +348,11 @@ namespace NugetForUnity
             NetStandard20Or21,
         }
 
+        // Ignore Spelling: dotnet
         private readonly struct TargetFrameworkSupport
         {
-            public readonly string Name;
-
-            public readonly UnityVersion? MinimumUnityVersion;
-
-            public readonly DotnetVersionCompatibilityLevel[] SupportedDotnetVersions;
-
-            public TargetFrameworkSupport(string name,
+            public TargetFrameworkSupport(
+                string name,
                 UnityVersion? minimumUnityVersion = null,
                 params DotnetVersionCompatibilityLevel[] supportedDotnetVersions)
             {
@@ -182,126 +360,12 @@ namespace NugetForUnity
                 MinimumUnityVersion = minimumUnityVersion;
                 SupportedDotnetVersions = supportedDotnetVersions;
             }
-        }
 
-        private readonly struct UnityVersion : IComparable<UnityVersion>
-        {
-            public readonly int Major;
+            public UnityVersion? MinimumUnityVersion { get; }
 
-            public readonly int Minor;
+            public string Name { get; }
 
-            public readonly int Revision;
-
-            public readonly char Release;
-
-            public readonly int Build;
-
-            [SuppressMessage("ReSharper", "AutoPropertyCanBeMadeGetOnly.Local", Justification = "Property setter needed for unit test")]
-            public static UnityVersion Current { get; private set; } = new UnityVersion(Application.unityVersion);
-
-            public UnityVersion(string version)
-            {
-                var match = Regex.Match(version, @"(\d+)\.(\d+)\.(\d+)([fpba])(\d+)");
-                if (!match.Success)
-                {
-                    throw new ArgumentException("Invalid unity version");
-                }
-
-                Major = int.Parse(match.Groups[1].Value);
-                Minor = int.Parse(match.Groups[2].Value);
-                Revision = int.Parse(match.Groups[3].Value);
-                Release = match.Groups[4].Value[0];
-                Build = int.Parse(match.Groups[5].Value);
-            }
-
-            public UnityVersion(int major, int minor, int revision, char release, int build)
-            {
-                Major = major;
-                Minor = minor;
-                Revision = revision;
-                Release = release;
-                Build = build;
-            }
-
-            public static int Compare(UnityVersion a, UnityVersion b)
-            {
-                if (a.Major < b.Major)
-                {
-                    return -1;
-                }
-
-                if (a.Major > b.Major)
-                {
-                    return 1;
-                }
-
-                if (a.Minor < b.Minor)
-                {
-                    return -1;
-                }
-
-                if (a.Minor > b.Minor)
-                {
-                    return 1;
-                }
-
-                if (a.Revision < b.Revision)
-                {
-                    return -1;
-                }
-
-                if (a.Revision > b.Revision)
-                {
-                    return 1;
-                }
-
-                if (a.Release < b.Release)
-                {
-                    return -1;
-                }
-
-                if (a.Release > b.Release)
-                {
-                    return 1;
-                }
-
-                if (a.Build < b.Build)
-                {
-                    return -1;
-                }
-
-                if (a.Build > b.Build)
-                {
-                    return 1;
-                }
-
-                return 0;
-            }
-
-            public int CompareTo(UnityVersion other)
-            {
-                return Compare(this, other);
-            }
-
-            public static bool operator <(UnityVersion left, UnityVersion right)
-            {
-                return left.CompareTo(right) < 0;
-            }
-
-            public static bool operator <=(UnityVersion left, UnityVersion right)
-            {
-                return left.CompareTo(right) <= 0;
-            }
-
-            public static bool operator >(UnityVersion left, UnityVersion right)
-            {
-                return left.CompareTo(right) > 0;
-            }
-
-            public static bool operator >=(UnityVersion left, UnityVersion right)
-            {
-                return left.CompareTo(right) >= 0;
-            }
+            public DotnetVersionCompatibilityLevel[] SupportedDotnetVersions { get; }
         }
     }
 }

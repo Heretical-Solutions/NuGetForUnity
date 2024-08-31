@@ -1,6 +1,8 @@
 ﻿#nullable enable
 
 using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace UnityEngine
 {
@@ -26,10 +28,10 @@ namespace UnityEngine
 
         internal static void LogWarning(string format, params object[] args)
         {
-            var oldForgroundColor = Console.ForegroundColor;
+            var oldForegroundColor = Console.ForegroundColor;
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine(format, args);
-            Console.ForegroundColor = oldForgroundColor;
+            Console.ForegroundColor = oldForegroundColor;
         }
 
         internal static void LogWarningFormat(string format, params object[] args)
@@ -43,9 +45,16 @@ namespace UnityEngine
             Console.Error.WriteLine(format, args);
         }
 
-        internal static void Assert(bool condition)
+        internal static void LogException(Exception e)
         {
-            System.Diagnostics.Debug.Assert(condition);
+            HasError = true;
+            Console.Error.WriteLine(e.ToString());
+        }
+
+        [Conditional("DEBUG")]
+        internal static void Assert([DoesNotReturnIf(false)] bool condition, string message)
+        {
+            System.Diagnostics.Debug.Assert(condition, message);
         }
     }
 }

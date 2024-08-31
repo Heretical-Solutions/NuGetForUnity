@@ -6,16 +6,25 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using NugetForUnity;
+using NugetForUnity.Configuration;
 using UnityEngine;
 
 namespace NuGetForUnity.Cli
 {
+    /// <summary>
+    ///     Simple command line interface to restore NuGet packages for Unity projects.
+    /// </summary>
     public static class Program
     {
-        private static readonly string[] helpOptions = { "-?", "-h", "--help" };
+        private static readonly string[] HelpOptions = { "-?", "-h", "--help" };
 
         private static string DefaultProjectPath => Directory.GetCurrentDirectory();
 
+        /// <summary>
+        ///     Starting point of the application.
+        /// </summary>
+        /// <param name="args">The command line arguments.</param>
+        /// <returns>The application exit code.</returns>
         public static int Main(string[] args)
         {
             var availableArguments = args.ToList();
@@ -31,7 +40,7 @@ namespace NuGetForUnity.Cli
             string projectPath;
             if (availableArguments.Count != 0)
             {
-                projectPath = availableArguments[0].Replace("'", "").Replace("\"", "");
+                projectPath = availableArguments[0].Replace("'", string.Empty).Replace("\"", string.Empty);
                 availableArguments.RemoveAt(0);
             }
             else
@@ -52,8 +61,7 @@ namespace NuGetForUnity.Cli
             Application.SetUnityProjectPath(projectPath);
 
             // need to disable dependency installation as UnityPreImportedLibraryResolver.GetAlreadyImportedLibs is not working outside Unity.
-            NugetHelper.InstallDependencies = false;
-            NugetHelper.Restore();
+            PackageRestorer.Restore(true);
             FixRoslynAnalyzerImportSettings();
             return Debug.HasError ? 1 : 0;
         }
@@ -73,13 +81,13 @@ namespace NuGetForUnity.Cli
                 return;
             }
 
-            if (NugetHelper.NugetConfigFile == null || !Directory.Exists(NugetHelper.NugetConfigFile.RepositoryPath))
+            if (!Directory.Exists(ConfigurationManager.NugetConfigFile.RepositoryPath))
             {
                 return;
             }
 
             UTF8Encoding? utf8NoBom = null;
-            foreach (var packageDirectoryPath in Directory.EnumerateDirectories(NugetHelper.NugetConfigFile.RepositoryPath))
+            foreach (var packageDirectoryPath in Directory.EnumerateDirectories(ConfigurationManager.NugetConfigFile.RepositoryPath))
             {
                 var analyzersDirectoryPath = Path.Combine(packageDirectoryPath, "analyzers");
                 if (!Directory.Exists(analyzersDirectoryPath))
@@ -99,21 +107,21 @@ namespace NuGetForUnity.Cli
                     File.WriteAllText(
                         analyzerDllMetaPath,
                         $"""
-                        fileFormatVersion: 2
-                        guid: {Guid.NewGuid():N}
-                        labels:
-                        - RoslynAnalyzer
-                        PluginImporter:
-                          platformData:
-                          - first:
-                              : Any
-                            second:
-                              enabled: 0
-                          - first:
-                              Any:
-                            second:
-                              enabled: 0
-                        """,
+                         fileFormatVersion: 2
+                         guid: {Guid.NewGuid():N}
+                         labels:
+                         - RoslynAnalyzer
+                         PluginImporter:
+                           platformData:
+                           - first:
+                               : Any
+                             second:
+                               enabled: 0
+                           - first:
+                               Any:
+                             second:
+                               enabled: 0
+                         """,
                         utf8NoBom);
                 }
             }
@@ -121,7 +129,7 @@ namespace NuGetForUnity.Cli
 
         private static bool IsHelpOption(string argument)
         {
-            return helpOptions.Any(helpOption => argument.Equals(helpOption, StringComparison.OrdinalIgnoreCase));
+            return HelpOptions.Any(helpOption => argument.Equals(helpOption, StringComparison.OrdinalIgnoreCase));
         }
 
         private static int PrintUsage()
@@ -134,18 +142,18 @@ namespace NuGetForUnity.Cli
                 description.Split(new[] { "\n", "\r\n" }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
             Console.WriteLine(
                 $"""
-                Description:
-                    {description}
+                 Description:
+                     {description}
 
-                Usage:
-                    nugetforunity restore <PROJECT_PATH> [options]
+                 Usage:
+                     nugetforunity restore <PROJECT_PATH> [options]
 
-                Arguments:
-                    <PROJECT_PATH>  The path to the Unity project, should be the root path where e.g. the 'ProjectSettings' folder is located. If not specified, the command will use the current directory. [default: {DefaultProjectPath}]
+                 Arguments:
+                     <PROJECT_PATH>  The path to the Unity project, should be the root path where e.g. the 'ProjectSettings' folder is located. If not specified, the command will use the current directory. [default: {DefaultProjectPath}]
 
-                Options:
-                    -?, -h, --help  Show command line help.
-                """);
+                 Options:
+                     -?, -h, --help  Show command line help.
+                 """);
             return 1;
         }
     }
